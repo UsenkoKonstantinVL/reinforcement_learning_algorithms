@@ -16,7 +16,7 @@ EPOCH = 20000
 EPISODE = 200
 EPOCH_PER_TRAINING = 5
 
-RENDER = True
+RENDER = False
 
 
 config = tf.ConfigProto(device_count={'GPU': 0})
@@ -117,10 +117,10 @@ def choose_action(sess, agent, state):
 
 def normalise_state(state):
     global max_state
-    state[0] = state[0] / max_state[0]
-    state[1] = state[1] / max_state[1]
-    state[2] = state[2] / max_state[2]
-    state[3] = state[3] / max_state[3]
+    state[0] = state[0] / 1.6  # max_state[0]
+    state[1] = state[1] / 1.5  # max_state[1]
+    state[2] = state[2] / 12  # max_state[2]
+    state[3] = state[3] / 0.6  # max_state[3]
     return state
 
 
@@ -178,6 +178,7 @@ with tf.Session(config=config) as sess:
             cum_reward += reward
             if done:
                 cum_reward = -10
+                next_state = None
             tot_reward += cum_reward
             mem.add_sample((state, action, cum_reward, next_state))
 
@@ -188,4 +189,5 @@ with tf.Session(config=config) as sess:
             if done:
                 break
 
-        print("{}: sum reward: {}".format(epoch + 1, tot_reward))
+        # print("{}: sum reward: {}".format(epoch + 1, tot_reward))
+        print("{}: sum reward: {}, episodes: {}".format(epoch + 1, tot_reward, episode))
