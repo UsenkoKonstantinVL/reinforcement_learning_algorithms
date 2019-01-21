@@ -44,10 +44,10 @@ class Agent:
         self._q_s_a = tf.placeholder(shape=[None, self._num_actions], dtype=tf.float64)
         # create a couple of fully connected hidden layers
         fc1 = tf.layers.dense(self._states, 16, activation=tf.nn.relu)
-        fc2 = tf.layers.dense(fc1, 32, activation=tf.nn.relu)
+        fc2 = tf.layers.dense(fc1, 16, activation=tf.nn.relu)
         self._logits = tf.layers.dense(fc2, self._num_actions)
         loss = tf.losses.mean_squared_error(self._q_s_a, self._logits)
-        self._optimizer = tf.train.AdamOptimizer().minimize(loss)
+        self._optimizer = tf.train.AdamOptimizer(0.0001).minimize(loss)
         self._var_init = tf.global_variables_initializer()
 
     def predict_one(self, state, sess):
