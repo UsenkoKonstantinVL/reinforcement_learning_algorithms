@@ -13,10 +13,10 @@ BATCH_SIZE = 64
 
 GYME_NAME = 'CartPole-v0'
 EPOCH = 20000
-EPISODE = 200
+EPISODE = 180
 EPOCH_PER_TRAINING = 5
 
-RENDER = True
+RENDER = False
 
 
 config = tf.ConfigProto(device_count={'GPU': 0})
@@ -36,10 +36,15 @@ class Agent:
         self._actions = None
         # Define outputs and optimizer
         self._logits = None
+        self._softmax_output = None
         self._optimizer = None
         self._var_init = None
         # Setup the model
+        self.learning_rate = 0.0005
         self.build_model()
+        self.discount_factor = 0.99
+        self.model = self.build_model()
+        self.states, self.actions, self.rewards = [], [], []
 
     # approximate policy using Neural Network
     # state is input and probability of each action is output of network
@@ -47,20 +52,21 @@ class Agent:
         self._states = tf.placeholder(shape=[None, self._num_states], dtype=tf.float64)
         self._q_s_a = tf.placeholder(shape=[None, self._num_actions], dtype=tf.float64)
         # create a couple of fully connected hidden layers
-        fc1 = tf.layers.dense(self._states, 15, activation=tf.nn.relu)
-        fc2 = tf.layers.dense(fc1, 15, activation=tf.nn.relu)
+        fc1 = tf.layers.dense(self._states, 16, activation=tf.nn.relu)
+        fc2 = tf.layers.dense(fc1, 8, activation=tf.nn.relu)
         self._logits = tf.layers.dense(fc2, self._num_actions, activation=tf.nn.sigmoid)
+        self._softmax_output = tf.layers.dense(self._logits, self._num_actions, activation=tf.nn.softmax)
         loss = tf.losses.mean_squared_error(self._q_s_a, self._logits)
-        self._optimizer = tf.train.AdamOptimizer().minimize(loss)
+        self._optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(loss)
         self._var_init = tf.global_variables_initializer()
 
     def predict_one(self, state, sess):
-        return sess.run(self._logits, feed_dict={self._states: state.reshape(1, self.num_states)})
+        return sess.run(self._softmax_output, feed_dict={self._states: state.reshape(1, self.num_states)})
 
     # Return argument of action
     def predict_action(self, state, sess):
         policy = self.predict_one(state, sess)
-        return np.random.choice(self.action_size, 1, p=policy)
+        return np.random.choice(self._num_actions, 1, p=policy[0])[0]
 
     def append_sample(self, state, action, reward):
         self.states.append(state)
@@ -83,8 +89,8 @@ class Agent:
         discounted_rewards -= np.mean(discounted_rewards)
         discounted_rewards /= np.std(discounted_rewards)
 
-        update_inputs = np.zeros((episode_length, self.state_size))
-        advantages = np.zeros((episode_length, self.action_size))
+        update_inputs = np.zeros((episode_length, self._num_states))
+        advantages = np.zeros((episode_length, self._num_actions))
 
         for i in range(episode_length):
             update_inputs[i] = self.states[i]
@@ -93,53 +99,30 @@ class Agent:
         sess.run(self._optimizer, feed_dict={self._states: update_inputs, self._q_s_a: advantages})
         self.states, self.actions, self.rewards = [], [], []
 
+    @property
+    def num_states(self):
+        return self._num_states
 
-def choose_action(sess, agent, state):
-    global eps, MIN_EPSILON, MAX_EPSILON
-    if random.random() < eps:
-        act = random.randint(0, agent.num_actions - 1)
-    else:
-        act = np.argmax(agent.predict_one(state, sess))
-    if eps > MIN_EPSILON:
-        eps = eps - (MAX_EPSILON - MIN_EPSILON) / 6000
-    return act
+    @property
+    def num_actions(self):
+        return self._num_actions
+
+    @property
+    def batch_size(self):
+        return 0
+
+    @property
+    def var_init(self):
+        return self._var_init
 
 
 def normalise_state(state):
     global max_state
-    state[0] = state[0] / max_state[0]
-    state[1] = state[1] / max_state[1]
-    state[2] = state[2] / max_state[2]
-    state[3] = state[3] / max_state[3]
+    state[0] = state[0] / 1.6  # max_state[0]
+    state[1] = state[1] / 1.5  # max_state[1]
+    state[2] = state[2] / 12  # max_state[2]
+    state[3] = state[3] / 0.6  # max_state[3]
     return state
-
-
-def replay(sess, agent, memory):
-    batch = memory.sample(agent.batch_size)
-    states = np.array([val[0] for val in batch])
-    next_states = np.array([(np.zeros(agent.num_states)
-                             if val[3] is None else val[3]) for val in batch])
-    # predict Q(s,a) given the batch of states
-    q_s_a = agent.predict_batch(states, sess)
-    # predict Q(s',a') - so that we can do gamma * max(Q(s'a')) below
-    q_s_a_d = agent.predict_batch(next_states, sess)
-    # setup training arrays
-    x = np.zeros((len(batch), agent.num_states))
-    y = np.zeros((len(batch), agent.num_actions))
-    for i, b in enumerate(batch):
-        state, action, reward, next_state = b[0], b[1], b[2], b[3]
-        # get the current q values for all actions in state
-        current_q = q_s_a[i]
-        # update the q value for action
-        if next_state is None:
-            # in this case, the game completed after action, so there is no max Q(s',a')
-            # prediction possible
-            current_q[action] = reward
-        else:
-            current_q[action] = reward + GAMMA * np.amax(q_s_a_d[i])
-        x[i] = state
-        y[i] = current_q
-    agent.train_batch(sess, x, y)
 
 
 env = gym.make(GYME_NAME)
@@ -149,8 +132,8 @@ max_state = env.env.observation_space.high
 num_actions = env.env.action_space.n
 
 agent = Agent(num_states, num_actions, BATCH_SIZE)
-# TODO: delete mem
-mem = Memory(50000)
+
+stat_states = []
 
 eps = MAX_EPSILON
 with tf.Session(config=config) as sess:
@@ -163,21 +146,32 @@ with tf.Session(config=config) as sess:
         for episode in range(EPISODE):
             if RENDER:
                 env.render()
-            action = choose_action(sess, agent, state)
+            action = agent.predict_action(state, sess)
             _next_state, reward, done, info = env.step(action)
             next_state = normalise_state(_next_state)
-            cum_reward += reward
-            if done:
-                cum_reward = -10
-            tot_reward += cum_reward
-            agent.append_sample()
-            mem.add_sample((state, action, cum_reward, next_state))
 
-            # Train our network
-            if (epoch + 1) % EPOCH_PER_TRAINING == 0:
-                replay(sess, agent, mem)
+            angle = -math.fabs(_next_state[2])
+            angle_vel = -math.fabs(_next_state[3])
+
+            cum_reward = reward  # angle + angle_vel
+            tot_reward += cum_reward
+
+            if done:
+                cum_reward += -10
+                tot_reward += -10
+            elif (episode + 1) == EPISODE:
+                cum_reward += 10
+                tot_reward += 10
+
+            agent.append_sample(state, action, cum_reward)
+
+            stat_states.append(_next_state)
 
             if done:
                 break
+        agent.train_model()
 
-        print("{}: sum reward: {}".format(epoch + 1, tot_reward))
+        print("{}: sum reward: {}, episodes: {}".format(epoch + 1, tot_reward, episode))
+        np_stat_states = np.array(stat_states)
+        #print(np_stat_states.mean(0))
+        print(np_stat_states.max(0))
