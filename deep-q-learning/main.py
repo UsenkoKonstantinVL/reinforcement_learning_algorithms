@@ -8,7 +8,7 @@ import math
 MAX_EPSILON = 1
 MIN_EPSILON = 0.01
 LAMBDA = 0.0001
-GAMMA = 0.7
+GAMMA = 0.9
 BATCH_SIZE = 32
 
 GAME_NAME = 'CartPole-v0'
@@ -16,7 +16,7 @@ EPOCH = 20000
 EPISODE = 150
 EPOCH_PER_TRAINING = 5
 
-RENDER = False
+RENDER = True
 
 
 config = tf.ConfigProto(device_count={'GPU': 0})
@@ -43,11 +43,11 @@ class Agent:
         self._states = tf.placeholder(shape=[None, self._num_states], dtype=tf.float64)
         self._q_s_a = tf.placeholder(shape=[None, self._num_actions], dtype=tf.float64)
         # create a couple of fully connected hidden layers
-        fc1 = tf.layers.dense(self._states, 8, activation=tf.nn.relu)
-        fc2 = tf.layers.dense(fc1, 8, activation=tf.nn.relu)
+        fc1 = tf.layers.dense(self._states, 16, activation=tf.nn.relu)
+        fc2 = tf.layers.dense(fc1, 16, activation=tf.nn.relu)
         self._logits = tf.layers.dense(fc2, self._num_actions)
         loss = tf.losses.mean_squared_error(self._q_s_a, self._logits)
-        self._optimizer = tf.train.AdamOptimizer().minimize(loss)
+        self._optimizer = tf.train.AdamOptimizer(learning_rate=LAMBDA).minimize(loss)
         self._var_init = tf.global_variables_initializer()
 
     def predict_one(self, state, sess):
@@ -181,13 +181,15 @@ with tf.Session(config=config) as sess:
             cum_reward = reward / 10.0
             if done:
                 cum_reward = -0.1
-                next_state = None
+                # next_state = None
             tot_reward += cum_reward
             mem.add_sample((state, action, cum_reward, next_state))
 
             # Train our network
             if (epoch + 1) % EPOCH_PER_TRAINING == 0:
                 replay(sess, agent, mem)
+
+            state = next_state
 
             # if done:
                 # break

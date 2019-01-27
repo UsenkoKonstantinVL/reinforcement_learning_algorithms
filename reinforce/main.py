@@ -16,7 +16,7 @@ EPOCH = 20000
 EPISODE = 180
 EPOCH_PER_TRAINING = 5
 
-RENDER = False
+RENDER = True
 
 
 config = tf.ConfigProto(device_count={'GPU': 0})
@@ -43,7 +43,7 @@ class Agent:
         self.learning_rate = 0.0005
         self.build_model()
         self.discount_factor = 0.99
-        self.model = self.build_model()
+        self.build_model()
         self.states, self.actions, self.rewards = [], [], []
 
     # approximate policy using Neural Network
@@ -118,16 +118,19 @@ class Agent:
 
 def normalise_state(state):
     global max_state
-    state[0] = state[0] / 1.6  # max_state[0]
-    state[1] = state[1] / 1.5  # max_state[1]
-    state[2] = state[2] / 12  # max_state[2]
-    state[3] = state[3] / 0.6  # max_state[3]
-    return state
+    state[0] = state[0]  # / 1.6  # max_state[0]
+    state[1] = state[1]  # / 1.5  # max_state[1]
+    state[2] = state[2]  # / 12  # max_state[2]
+    state[3] = state[3]  # / 0.6  # max_state[3]
+    new_state = np.zeros((1, num_states))[0]
+    new_state[0] = state[2]
+    new_state[1] = state[3]
+    return new_state
 
 
 env = gym.make(GYME_NAME)
 
-num_states = env.env.observation_space.shape[0]
+num_states = 2  # env.env.observation_space.shape[0]
 max_state = env.env.observation_space.high
 num_actions = env.env.action_space.n
 
@@ -153,25 +156,34 @@ with tf.Session(config=config) as sess:
             angle = -math.fabs(_next_state[2])
             angle_vel = -math.fabs(_next_state[3])
 
-            cum_reward = reward  # angle + angle_vel
+            cum_reward = (angle + angle_vel) / 100 # angle + angle_vel
+
+            if not done:
+                cum_reward += 1
+
+            '''if done:
+                cum_reward = -1
+            else:
+                cum_reward = 0.1 '''
             tot_reward += cum_reward
 
-            if done:
+            '''if done:
                 cum_reward += -10
                 tot_reward += -10
             elif (episode + 1) == EPISODE:
                 cum_reward += 10
-                tot_reward += 10
+                tot_reward += 10'''
 
             agent.append_sample(state, action, cum_reward)
 
             stat_states.append(_next_state)
+            state = next_state
 
-            if done:
-                break
+            #if done:
+                #break
         agent.train_model()
 
         print("{}: sum reward: {}, episodes: {}".format(epoch + 1, tot_reward, episode))
         np_stat_states = np.array(stat_states)
-        #print(np_stat_states.mean(0))
-        print(np_stat_states.max(0))
+        # print(np_stat_states.mean(0))
+        # print(np_stat_states.max(0))
