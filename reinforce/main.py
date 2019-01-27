@@ -16,15 +16,13 @@ EPOCH = 20000
 EPISODE = 180
 EPOCH_PER_TRAINING = 5
 
-RENDER = True
+RENDER = False
 
 
 config = tf.ConfigProto(device_count={'GPU': 0})
 
 
 class Agent:
-
-    render = True
 
     def __init__(self,  num_states, num_actions, batch_size):
         # Define states, actions and batch size
@@ -53,10 +51,11 @@ class Agent:
         self._q_s_a = tf.placeholder(shape=[None, self._num_actions], dtype=tf.float64)
         # create a couple of fully connected hidden layers
         fc1 = tf.layers.dense(self._states, 16, activation=tf.nn.relu)
-        fc2 = tf.layers.dense(fc1, 8, activation=tf.nn.relu)
+        fc2 = tf.layers.dense(fc1, 16, activation=tf.nn.relu)
         self._logits = tf.layers.dense(fc2, self._num_actions, activation=tf.nn.sigmoid)
         self._softmax_output = tf.layers.dense(self._logits, self._num_actions, activation=tf.nn.softmax)
-        loss = tf.losses.mean_squared_error(self._q_s_a, self._logits)
+        q_s_a_softmax = tf.layers.dense(self._q_s_a, self._num_actions, activation=tf.nn.softmax)
+        loss = tf.losses.mean_squared_error(q_s_a_softmax, self._softmax_output)
         self._optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(loss)
         self._var_init = tf.global_variables_initializer()
 
@@ -122,15 +121,16 @@ def normalise_state(state):
     state[1] = state[1]  # / 1.5  # max_state[1]
     state[2] = state[2]  # / 12  # max_state[2]
     state[3] = state[3]  # / 0.6  # max_state[3]
-    new_state = np.zeros((1, num_states))[0]
+    return state
+    '''new_state = np.zeros((1, num_states))[0]
     new_state[0] = state[2]
     new_state[1] = state[3]
-    return new_state
+    return new_state'''
 
 
 env = gym.make(GYME_NAME)
 
-num_states = 2  # env.env.observation_space.shape[0]
+num_states = env.env.observation_space.shape[0]
 max_state = env.env.observation_space.high
 num_actions = env.env.action_space.n
 
@@ -156,10 +156,14 @@ with tf.Session(config=config) as sess:
             angle = -math.fabs(_next_state[2])
             angle_vel = -math.fabs(_next_state[3])
 
-            cum_reward = (angle + angle_vel) / 100 # angle + angle_vel
+            cum_reward = (angle + angle_vel)  # angle + angle_vel
 
-            if not done:
-                cum_reward += 1
+            '''if done and (episode + 1 == EPISODE):
+                cum_reward = -1.5
+            elif done:
+                cum_reward = -1
+            else:
+                cum_reward = 0.8'''
 
             '''if done:
                 cum_reward = -1

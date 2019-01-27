@@ -121,10 +121,11 @@ def normalise_state(state):
     state[1] = state[1] / 1.5  # max_state[1]
     state[2] = state[2] / 12  # max_state[2]
     state[3] = state[3] / 0.6  # max_state[3]
-    new_state = np.zeros((1, num_states))[0]
+    '''new_state = np.zeros((1, num_states))[0]
     new_state[0] = state[2]
     new_state[1] = state[3]
-    return new_state
+    return new_state'''
+    return  state
 
 
 def replay(sess, agent, memory):
@@ -157,7 +158,7 @@ def replay(sess, agent, memory):
 
 env = gym.make(GAME_NAME)
 
-num_states = 2  # env.env.observation_space.shape[0]
+num_states = env.env.observation_space.shape[0]
 max_state = env.env.observation_space.high
 num_actions = env.env.action_space.n
 
@@ -180,13 +181,15 @@ with tf.Session(config=config) as sess:
             next_state = normalise_state(_next_state)
             cum_reward = reward / 10.0
             if done:
-                cum_reward = -0.1
+                cum_reward = -1
+            else:
+                cum_reward = 0.8
                 # next_state = None
             tot_reward += cum_reward
             mem.add_sample((state, action, cum_reward, next_state))
 
             # Train our network
-            if (epoch + 1) % EPOCH_PER_TRAINING == 0:
+            if (episode + 1) % EPOCH_PER_TRAINING == 0:
                 replay(sess, agent, mem)
 
             state = next_state
