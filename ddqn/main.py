@@ -4,27 +4,26 @@ import numpy as np
 import random
 import math
 
-
 MAX_EPSILON = 1
 MIN_EPSILON = 0.01
 LAMBDA = 0.0001
 GAMMA = 0.9
+TAU = 0.9
 BATCH_SIZE = 32
 
 GAME_NAME = 'CartPole-v0'
 EPOCH = 20000
-EPISODE = 150
+EPISODE = 199
 EPOCH_PER_TRAINING = 5
 
 RENDER = True
-
 
 config = tf.ConfigProto(device_count={'GPU': 0})
 
 
 # class from https://github.com/adventuresinML/adventures-in-ml-code/blob/master/r_learning_tensorflow.py
 class Agent:
-    def __init__(self, num_states, num_actions, batch_size):
+    def __init__(self, num_states, num_actions, batch_size, gamma=0.9, tau=0.9):
         # Define states, actions and batch size
         self._num_states = num_states
         self._num_actions = num_actions
@@ -37,31 +36,69 @@ class Agent:
         self._optimizer = None
         self._var_init = None
         # Setup the model
-        self._define_model()
+        self.gamma = gamma
+        self.tau = tau
 
-    def _define_model(self):
-        self._states = tf.placeholder(shape=[None, self._num_states], dtype=tf.float64)
         self._q_s_a = tf.placeholder(shape=[None, self._num_actions], dtype=tf.float64)
-        # create a couple of fully connected hidden layers
-        fc1 = tf.layers.dense(self._states, 16, activation=tf.nn.relu)
-        fc2 = tf.layers.dense(fc1, 16, activation=tf.nn.relu)
-        self._logits = tf.layers.dense(fc2, self._num_actions)
-        loss = tf.losses.mean_squared_error(self._q_s_a, self._logits)
+        self.states = tf.placeholder(shape=[None, self._num_states], dtype=tf.float64)
+        self.next_state = tf.placeholder(shape=[None, self._num_states], dtype=tf.float64)
+
+        with tf.variable_scope('estimate'):
+            self.q_values = self._define_model(self.states)
+
+        with tf.variable_scope('target'):
+            self.q_target = self._define_model(self.next_state)
+
+        loss = tf.losses.mean_squared_error(self._q_s_a, self.q_values)
         self._optimizer = tf.train.AdamOptimizer(learning_rate=LAMBDA).minimize(loss)
         self._var_init = tf.global_variables_initializer()
 
+        '''train_params = self.get_variables("estimate")
+        fixed_params = self.get_variables("target")
+
+        try:
+            self.copy_network_ops = [tf.assign(fixed_v, train_v)
+                                     for train_v, fixed_v in zip(train_params, fixed_params)]
+        except Exception:
+            print("error")'''
+
+        # self.hard_copy_to_target_actor = self.copy_to_target_network(self.q_values, self.q_target)
+
+        self.trainables = tf.trainable_variables()
+
+        self.target_ops = self.update_target_network(self.trainables, self.tau)
+
+    def _define_model(self, input_placeholder):
+        # create a couple of fully connected hidden layers
+        fc1 = tf.layers.dense(input_placeholder, 16, activation=tf.nn.relu)
+        fc2 = tf.layers.dense(fc1, 16, activation=tf.nn.relu)
+        logits = tf.layers.dense(fc2, self._num_actions)
+        return logits
+
     def predict_one(self, state, sess):
-        return sess.run(self._logits, feed_dict={self._states: state.reshape(1, self.num_states)})
+        return sess.run(self.q_values, feed_dict={self.states: state.reshape(1, self.num_states)})
+
+    def predict_target(self, next_state, sess):
+        return sess.run(self.q_target, feed_dict={self.next_state: next_state})
 
     # Return argument of action
     def predict_action(self, state, sess):
         return np.argmax(self.predict_one(state, sess))
 
     def predict_batch(self, states, sess):
-        return sess.run(self._logits, feed_dict={self._states: states})
+        return sess.run(self.q_values, feed_dict={self.states: states})
 
     def train_batch(self, sess, x_batch, y_batch):
-        sess.run(self._optimizer, feed_dict={self._states: x_batch, self._q_s_a: y_batch})
+        sess.run(self._optimizer, feed_dict={self.states: x_batch, self._q_s_a: y_batch})
+
+    @staticmethod
+    def copy_to_target_network(source_network, target_network):
+        target_network_update = []
+        for v_source, v_target in zip(source_network.variables(), target_network.variables()):
+            # this is equivalent to target = source
+            update_op = v_target.assign(v_source)
+            target_network_update.append(update_op)
+        return tf.group(*target_network_update)
 
     @property
     def num_states(self):
@@ -79,11 +116,22 @@ class Agent:
     def var_init(self):
         return self._var_init
 
+    # def update_target_network(self):
+    #    self.session.run(self.hard_copy_to_target_actor)
 
-# TODO: сделать логгер, который будет сохранять в файл номер эпизода, среднее вознаграждение и суммарное вознаграждение
-class Logger:
-    def __init__(self, log_name='file_log.csv', delete_file_if_exist=False):
-        pass
+    def update_target_network(self, trainable_vars, tau):
+        total_vars = len(trainable_vars)
+        op_holder = []
+        for idx, var in enumerate(trainable_vars[0: total_vars // 2]):
+            target_layer_id = idx + total_vars // 2
+            op_holder.append(
+                trainable_vars[target_layer_id].assign(
+                    (var.value() * tau) + ((1 - tau) * trainable_vars[target_layer_id].value())))
+        return op_holder
+
+    def update_target(self, sess):
+        for op in self.target_ops:
+            sess.run(op)
 
 
 # class from https://github.com/adventuresinML/adventures-in-ml-code/blob/master/r_learning_tensorflow.py
@@ -111,7 +159,7 @@ def choose_action(sess, agent, state):
     else:
         act = np.argmax(agent.predict_one(state, sess))
     if eps > MIN_EPSILON:
-        eps = eps - (MAX_EPSILON - MIN_EPSILON) / 500
+        eps = eps - (MAX_EPSILON - MIN_EPSILON) / 1000.0
     return act
 
 
@@ -121,11 +169,11 @@ def normalise_state(state):
     state[1] = state[1] / 1.5  # max_state[1]
     state[2] = state[2] / 12  # max_state[2]
     state[3] = state[3] / 0.6  # max_state[3]
+    return state
     '''new_state = np.zeros((1, num_states))[0]
     new_state[0] = state[2]
     new_state[1] = state[3]
     return new_state'''
-    return  state
 
 
 def replay(sess, agent, memory):
@@ -136,7 +184,7 @@ def replay(sess, agent, memory):
     # predict Q(s,a) given the batch of states
     q_s_a = agent.predict_batch(states, sess)
     # predict Q(s',a') - so that we can do gamma * max(Q(s'a')) below
-    q_s_a_d = agent.predict_batch(next_states, sess)
+    q_s_a_d = agent.predict_target(next_states, sess)
     # setup training arrays
     x = np.zeros((len(batch), agent.num_states))
     y = np.zeros((len(batch), agent.num_actions))
@@ -162,7 +210,7 @@ num_states = env.env.observation_space.shape[0]
 max_state = env.env.observation_space.high
 num_actions = env.env.action_space.n
 
-agent = Agent(num_states, num_actions, BATCH_SIZE)
+agent = Agent(num_states, num_actions, BATCH_SIZE, gamma=GAMMA, tau=TAU)
 mem = Memory(50000)
 
 eps = MAX_EPSILON
@@ -181,9 +229,7 @@ with tf.Session(config=config) as sess:
             next_state = normalise_state(_next_state)
             cum_reward = reward / 10.0
             if done:
-                cum_reward = -1
-            else:
-                cum_reward = 0.8
+                cum_reward = -0.1
                 # next_state = None
             tot_reward += cum_reward
             mem.add_sample((state, action, cum_reward, next_state))
@@ -195,7 +241,8 @@ with tf.Session(config=config) as sess:
             state = next_state
 
             # if done:
-                # break
+            # break
 
         # print("{}: sum reward: {}".format(epoch + 1, tot_reward))
+        agent.update_target(sess)
         print("{}: sum reward: {}, episodes: {}".format(epoch + 1, tot_reward, episode))
